@@ -1,55 +1,75 @@
-# app.py
 import streamlit as st
+import numpy as np
+import gdown
+import os
 from PIL import Image
-import random
+from tensorflow.keras.applications.vgg16 import preprocess_input
+from tensorflow import keras
 
-st.title("Facial Emotion Recognition")
+# ----------------------------
+# 1. Link Google Drive
+# ----------------------------
+MODEL_URL = "https://drive.google.com/uc?id=13RJB6HPpb_0Mx7qoPY8l-g5MzQvvU9Nd"
+MODEL_PATH = "final_vgg16_affectnet.keras"
 
-col1, col2 = st.columns(2)
+# ----------------------------
+# 2. Tải model
+# ----------------------------
+def download_model():
+    if not os.path.exists(MODEL_PATH):
+        with st.spinner("Đang tải mô hình (~160MB), vui lòng chờ..."):
+            gdown.download(MODEL_URL, MODEL_PATH, quiet=False)
+        st.success("Tải mô hình thành công!")
 
-with col1:
-    uploaded_file = st.file_uploader("Upload a clear face photo", type=["jpg", "jpeg", "png"])
+download_model()
 
-    if uploaded_file:
-        image = Image.open(uploaded_file)
-        st.image(image, caption="Uploaded Image", use_column_width=True)
-    else:
-        st.info("Please upload a photo")
+# ----------------------------
+# 3. Load model với cache
+# ----------------------------
+@st.cache_resource
+def load_model():
+    model = keras.models.load_model(MODEL_PATH)
+    return model
 
-    predict = st.button("Detect Emotion", type="primary", use_container_width=True)
+model = load_model()
 
-with col2:
-    st.write("### Prediction Result")
+# ----------------------------
+# 4. Nhãn cảm xúc
+# ----------------------------
+emotion_classes = [
+    'anger', 'contempt', 'disgust', 'fear',
+    'happy', 'neutral', 'sad', 'surprise'
+]
 
-    if uploaded_file and predict:
-        with st.spinner("Analyzing emotion..."):
-            emotions = [
-                "Anger", "Contempt", "Disgust", "Fear",
-                "Happy", "Neutral", "Sad", "Surprise"
-            ]
-            predicted = random.choice(emotions)
-            confidence = round(random.uniform(68, 97), 1)
+# ----------------------------
+# 5. Predict
+# ----------------------------
+def predict_emotion(img):
+    img = img.resize((224, 224))
+    img = np.array(img)
+    img = preprocess_input(img)
+    img = np.expand_dims(img, axis=0)
 
-        st.success(f"**{predicted}**")
-        st.metric("Confidence", f"{confidence}%")
-        st.progress(confidence / 100)
+    preds = model.predict(img)[0]
+    label_index = np.argmax(preds)
+    confidence = preds[label_index]
 
-        # Hiển thị tất cả 7 cảm xúc + xác suất giả lập
-        st.write("**All probabilities:**")
-        probs = {emo: round(random.uniform(1, 30), 2) for emo in emotions}
-        probs[predicted] = round(confidence, 2)
-        total = sum(probs.values())
-        probs = {k: round(v / total * 100, 2) for k, v in probs.items()}
-        probs[predicted] = confidence  # giữ chính xác
+    return emotion_classes[label_index], confidence
 
-        for emo in emotions:
-            color = "🟢" if emo == predicted else "⚪"
-            st.write(f"{color} **{emo}**: {probs[emo]}%")
+# ----------------------------
+# 6. UI
+# ----------------------------
+st.title("🎭 Nhận Diện Cảm Xúc Khuôn Mặt (VGG16 - AffectNet)")
+st.write("Upload một ảnh chân dung để dự đoán cảm xúc.")
 
-        st.image(image, use_column_width=True)
+uploaded_file = st.file_uploader("Chọn ảnh", type=["jpg", "jpeg", "png"])
 
-    else:
-        st.image("https://placehold.co/500x400/f3f4f6/9ca3af?text=Result+will+appear+here", use_column_width=True)
-        st.write("Upload a photo and click **Detect Emotion**")
+if uploaded_file is not None:
+    image = Image.open(uploaded_file).convert("RGB")
+    st.image(image, caption="Ảnh đã upload", use_column_width=True)
 
-st.caption("CS420 Final Project • VGG16 • AffectNet Dataset • 7 Emotions: Anger, Contempt, Disgust, Fear, Happy, Neutral, Sad, Surprise")
+    if st.button("Dự đoán"):
+        label, conf = predict_emotion(image)
+
+        st.subheader(f"🔍 Kết quả: **{label.upper()}**")
+        st.write(f"Độ tin cậy: **{conf:.2f}**")
