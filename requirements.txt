@@ -1,5 +1,6 @@
-streamlit>=1.18.0
-tensorflow-cpu>=2.11.0  # hoặc tensorflow (nếu bạn cần GPU) — tensorflow-cpu thường nhẹ hơn cho deploy
-pillow
+gdown
+tensorflow
+streamlit
+opencv-python
 numpy
-matplotlib
+Pillow
