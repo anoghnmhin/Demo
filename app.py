@@ -3,7 +3,6 @@ import numpy as np
 import gdown
 import os
 from PIL import Image
-import cv2
 from tensorflow.keras.applications.vgg16 import preprocess_input
 from tensorflow import keras
 
@@ -75,3 +74,4 @@ if uploaded_file is not None:
 
         st.subheader(f"🔍 Kết quả: **{label.upper()}**")
         st.write(f"Độ tin cậy: **{conf:.2f}**")
+
