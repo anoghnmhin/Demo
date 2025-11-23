@@ -8,28 +8,35 @@ from tensorflow.keras.applications.vgg16 import preprocess_input
 from tensorflow import keras
 
 # ============================
-# Page Config
+# CHỈNH CHỦ ĐỀ SÁNG (rất quan trọng!)
 # ============================
 st.set_page_config(
     page_title="Facial Emotion Recognition",
     page_icon="Face",
-    layout="centered"
+    layout="centered",
+    initial_sidebar_state="collapsed",
+    # BẮT BUỘC thêm dòng này để ép dùng theme sáng
+    menu_items=None
 )
 
+# Ép Streamlit dùng theme sáng 100%
+with open("streamlit.toml", "w") as f:
+    f.write('[theme]\nprimaryColor="#FF4B4B"\nbackgroundColor="#FFFFFF"\nsecondaryBackgroundColor="#F0F2F6"\ntextColor="#31333F"\nfont="sans serif"')
+
 # ============================
-# Light & Clean CSS (giữ phong cách cũ nhưng đẹp hơn)
+# CSS đẹp + sáng sủa
 # ============================
 st.markdown("""
 <style>
-    .main {background: #f8fafc; padding: 2rem;}
-    .title {font-size: 3rem; font-weight: 700; text-align: center; color: #1e293b;}
+    .main {background: #ffffff; padding: 2rem;}
+    .title {font-size: 3rem; font-weight: 700; text-align: center; color: #1e293b; margin-bottom: 0.5rem;}
     .subtitle {text-align: center; color: #64748b; font-size: 1.2rem; margin-bottom: 2rem;}
     .result-card {
-        background: white;
+        background: #ffffff;
         padding: 2rem;
         border-radius: 16px;
         text-align: center;
-        box-shadow: 0 8px 25px rgba(0,0,0,0.1);
+        box-shadow: 0 8px 32px rgba(0,0,0,0.08);
         border: 1px solid #e2e8f0;
         height: 100%;
     }
@@ -39,7 +46,7 @@ st.markdown("""
         background: #e2e8f0;
         border-radius: 6px;
         overflow: hidden;
-        margin: 1rem 0;
+        margin: 1.5rem 0;
     }
     .confidence-fill {
         height: 100%;
@@ -50,10 +57,10 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ============================
-# Title
+# Tiêu đề
 # ============================
 st.markdown('<h1 class="title">Face Facial Emotion Recognition</h1>', unsafe_allow_html=True)
-st.markdown('<p class="subtitle">Upload a clear portrait to detect one of 8 basic emotions</p>', unsafe_allow_html=True)
+st.markdown('<p class="subtitle">Upload a clear portrait photo • 8 emotions detection</p>', unsafe_allow_html=True)
 
 # ============================
 # Model
@@ -64,7 +71,7 @@ MODEL_PATH = "final_vgg16_affectnet.keras"
 if not os.path.exists(MODEL_PATH):
     with st.spinner("Downloading model (~160MB)..."):
         gdown.download(MODEL_URL, MODEL_PATH, quiet=False)
-    st.success("Model downloaded!")
+    st.success("Model ready!")
     st.balloons()
 
 @st.cache_resource
@@ -73,7 +80,7 @@ def load_model():
 model = load_model()
 
 # ============================
-# Emotions
+# Emotions + emoji chuẩn
 # ============================
 emotions = ['Anger', 'Contempt', 'Disgust', 'Fear', 'Happy', 'Neutral', 'Sad', 'Surprise']
 emoji_map = {
@@ -91,22 +98,20 @@ def predict_emotion(img):
     return emotions[idx], preds[idx], preds
 
 # ============================
-# Main Layout: 2 cột như cũ, KHÔNG CÒN Ô TRẮNG THỪA
+# Layout 2 cột – SÁNG SỦA – KHÔNG CÒN Ô TRẮNG
 # ============================
 uploaded_file = st.file_uploader(
     "Choose a clear face photo",
     type=["jpg", "jpeg", "png"],
-    help="Front-facing and well-lit photos work best",
     label_visibility="collapsed"
 )
 
 if uploaded_file:
     image = Image.open(uploaded_file).convert("RGB")
-
-    col1, col2 = st.columns([1, 1])
+    col1, col2 = st.columns(2)
 
     with col1:
-        st.image(image, caption="Uploaded Image", use_column_width=True)
+        st.image(image, caption="Your photo", use_column_width=True)
 
     with col2:
         st.markdown("<div class='result-card'>", unsafe_allow_html=True)
@@ -115,10 +120,9 @@ if uploaded_file:
             with st.spinner("Analyzing..."):
                 label, confidence, all_probs = predict_emotion(image)
 
-            # Kết quả hiện ngay trong cột phải
             st.markdown(f"<div class='emotion-big'>{emoji_map[label]}</div>", unsafe_allow_html=True)
-            st.markdown(f"### **{label}**", unsafe_allow_html=True)
-            st.markdown(f"#### Confidence: **{confidence:.1%}**")
+            st.markdown(f"<h2 style='color:#1e293b'>{label}</h2>", unsafe_allow_html=True)
+            st.markdown(f"<h4>Confidence: <b>{confidence:.1%}</b></h4>", unsafe_allow_html=True)
             
             st.markdown(f"""
                 <div class='confidence-bar'>
@@ -126,23 +130,17 @@ if uploaded_file:
                 </div>
             """, unsafe_allow_html=True)
 
-            with st.expander("View all probabilities"):
-                sorted_idx = np.argsort(all_probs)[::-1]
-                for i in sorted_idx:
-                    emo = emotions[i]
-                    st.write(f"{emoji_map[emo]} **{emo}**: {all_probs[i]:.2%}")
+            with st.expander("All emotion probabilities"):
+                for emo, prob in sorted(zip(emotions, all_probs), key=lambda x: x[1], reverse=True):
+                    st.write(f"{emoji_map[emo]} **{emo}**: {prob:.2%}")
+
         else:
-            # Khi chưa bấm nút → hiện placeholder đẹp thay vì ô trắng
-            st.markdown("<br><br>", unsafe_allow_html=True)
-            st.info("👈 Click **Detect Emotion** to see the result")
+            st.markdown("<br><br><br>", unsafe_allow_html=True)
+            st.info("Click **Detect Emotion** to see result")
 
         st.markdown("</div>", unsafe_allow_html=True)
 
 else:
-    st.info("Upload a photo to begin")
+    st.info("Upload a photo to start")
 
-# ============================
-# Footer
-# ============================
-st.markdown("---")
-st.caption("VGG16 • AffectNet Dataset • 8 Emotions • Made with Streamlit")
+st.caption("VGG16 • Trained on AffectNet • 8 emotions")
