@@ -3,107 +3,95 @@ import numpy as np
 import gdown
 import os
 from PIL import Image
-import time
 from tensorflow.keras.applications.vgg16 import preprocess_input
 from tensorflow import keras
 
 # ============================
-# CÀI ĐẶT TRANG
+# Page Config
 # ============================
 st.set_page_config(
-    page_title="Nhận diện cảm xúc khuôn mặt",
-    page_icon="🎭",
+    page_title="Facial Emotion Recognition",
+    page_icon="😊",
     layout="centered",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed"
 )
 
-# Custom CSS để làm đẹp giao diện
+# ============================
+# Light & Clean CSS
+# ============================
 st.markdown("""
 <style>
     .main {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        background: #f8fafc;
         padding: 2rem;
-        border-radius: 15px;
     }
     .title {
-        font-size: 3rem !important;
-        font-weight: 800;
+        font-size: 3rem;
+        font-weight: 700;
         text-align: center;
-        background: -webkit-linear-gradient(45deg, #f5f7fa, #c3cfe2);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
+        color: #1e293b;
         margin-bottom: 0.5rem;
     }
     .subtitle {
         text-align: center;
-        font-size: 1.3rem;
-        color: #e0e0e0;
+        color: #64748b;
+        font-size: 1.2rem;
         margin-bottom: 2rem;
     }
-    .upload-box {
-        border: 3px dashed #ffffff50;
-        border-radius: 15px;
+    .upload-area {
+        border: 2px dashed #cbd5e1;
+        border-radius: 12px;
         padding: 2rem;
         text-align: center;
-        background: rgba(255,255,255,0.1);
-        transition: all 0.3s;
+        background: #ffffff;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.05);
     }
-    .upload-box:hover {
-        border-color: #ffffff90;
-        background: rgba(255,255,255,0.2);
-    }
-    .result-box {
-        background: rgba(255,255,255,0.15);
+    .result-card {
+        background: white;
         padding: 2rem;
-        border-radius: 20px;
+        border-radius: 16px;
         text-align: center;
-        backdrop-filter: blur(10px);
-        border: 1px solid rgba(255,255,255,0.2);
+        box-shadow: 0 10px 25px rgba(0,0,0,0.08);
+        border: 1px solid #e2e8f0;
     }
-    .emotion-emoji {
-        font-size: 5rem;
-        margin: 1rem 0;
+    .emotion-big {
+        font-size: 4.5rem;
+        margin: 0.5rem 0;
     }
     .confidence-bar {
-        height: 20px;
-        background: rgba(255,255,255,0.2);
-        border-radius: 10px;
+        height: 12px;
+        background: #e2e8f0;
+        border-radius: 6px;
         overflow: hidden;
         margin: 1rem 0;
+    }
+    .confidence-fill {
+        height: 100%;
+        background: linear-gradient(90deg, #3b82f6, #10b981);
+        border-radius: 6px;
+        transition: width 1s ease-in-out;
     }
 </style>
 """, unsafe_allow_html=True)
 
 # ============================
-# TIÊU ĐỀ & GIỚI THIỆU
+# Title & Description
 # ============================
-st.markdown('<h1 class="title">🎭 Emotion Detector</h1>', unsafe_allow_html=True)
-st.markdown('<p class="subtitle">Phát hiện 8 cảm xúc cơ bản từ khuôn mặt: giận dữ, khinh thường, ghê tởm, sợ hãi, vui vẻ, trung lập, buồn, ngạc nhiên</p>', unsafe_allow_html=True)
+st.markdown('<h1 class="title">😊 Facial Emotion Recognition</h1>', unsafe_allow_html=True)
+st.markdown('<p class="subtitle">Upload a clear portrait photo and detect one of 8 basic emotions</p>', unsafe_allow_html=True)
 
 # ============================
-# DOWNLOAD MODEL
+# Model Download & Load
 # ============================
 MODEL_URL = "https://drive.google.com/uc?id=13RJB6HPpb_0Mx7qoPY8l-g5MzQvvU9Nd"
 MODEL_PATH = "final_vgg16_affectnet.keras"
 
-def download_model():
-    if not os.path.exists(MODEL_PATH):
-        st.warning("🔽 Đang tải mô hình VGG16-AffectNet (~160MB), lần đầu sẽ mất chút thời gian...")
-        progress_bar = st.progress(0)
-        with st.spinner("Đang tải mô hình..."):
-            gdown.download(MODEL_URL, MODEL_PATH, quiet=False)
-            for i in range(100):
-                time.sleep(0.01)
-                progress_bar.progress(i + 1)
-        st.success("✅ Tải mô hình thành công!")
-        st.balloons()
+if not os.path.exists(MODEL_PATH):
+    with st.spinner("Downloading model (~160MB)... This only happens once."):
+        gdown.download(MODEL_URL, MODEL_PATH, quiet=False)
+    st.success("Model downloaded successfully!")
+    st.balloons()
 
-with st.spinner("Kiểm tra mô hình..."):
-    download_model()
-
-# ============================
-# LOAD MODEL
-# ============================
 @st.cache_resource
 def load_model():
     return keras.models.load_model(MODEL_PATH)
@@ -111,89 +99,74 @@ def load_model():
 model = load_model()
 
 # ============================
-# DANH SÁCH CẢM XÚC + EMOJI
+# Emotion Labels
 # ============================
-emotion_classes = [
-    'anger', 'contempt', 'disgust', 'fear',
-    'happy', 'neutral', 'sad', 'surprise'
-]
-
+emotions = ['Anger', 'Contempt', 'Disgust', 'Fear', 'Happy', 'Neutral', 'Sad', 'Surprise']
 emoji_map = {
-    'anger': '😡', 'contempt': '😤', 'disgust': '🤢', 'fear': '😨',
-    'happy': '😊', 'neutral': '😐', 'sad': '😢', 'surprise': '😲'
-}
-
-vietnamese_names = {
-    'anger': 'Giận dữ', 'contempt': 'Khinh thường', 'disgust': 'Ghê tởm',
-    'fear': 'Sợ hãi', 'happy': 'Vui vẻ', 'neutral': 'Trung lập',
-    'sad': 'Buồn bã', 'surprise': 'Ngạc nhiên'
+    'Anger': '😡', 'Contempt': '😤', 'Disgust': '🤢', 'Fear': '😨',
+    'Happy': '😊', 'Neutral': '😐', 'Sad': '😢', 'Surprise': '😲'
 }
 
 # ============================
-# HÀM DỰ ĐOÁN
+# Prediction Function
 # ============================
 def predict_emotion(img):
-    img_resized = img.resize((224, 224))
-    img_array = np.array(img_resized)
-    img_array = preprocess_input(img_array)
-    img_array = np.expand_dims(img_array, axis=0)
-    preds = model.predict(img_array, verbose=0)[0]
-    label_idx = np.argmax(preds)
-    confidence = preds[label_idx]
-    label = emotion_classes[label_idx]
-    return label, confidence, preds
+    img = img.resize((224, 224))
+    arr = np.array(img)
+    arr = preprocess_input(arr)
+    arr = np.expand_dims(arr, axis=0)
+    preds = model.predict(arr, verbose=0)[0]
+    idx = np.argmax(preds)
+    return emotions[idx], preds[idx], preds
 
 # ============================
-# UPLOAD & HIỂN THỊ
+# Upload & Display
 # ============================
-col1, col2 = st.columns([1, 1])
+uploaded_file = st.file_uploader(
+    "Choose a clear face photo",
+    type=["jpg", "jpeg", "png"],
+    help="Best results with front-facing, well-lit portraits",
+    label_visibility="collapsed"
+)
 
-with col1:
-    st.markdown("<div class='upload-box'>", unsafe_allow_html=True)
-    uploaded_file = st.file_uploader(
-        "📸 Upload ảnh khuôn mặt của bạn",
-        type=["jpg", "jpeg", "png"],
-        help="Chọn ảnh rõ mặt, không che khuất"
-    )
-    st.markdown("</div>", unsafe_allow_html=True)
-
-if uploaded_file is not None:
+if uploaded_file:
     image = Image.open(uploaded_file).convert("RGB")
     
+    col1, col2 = st.columns([1, 1])
+    with col1:
+        st.image(image, caption="Uploaded Image", use_column_width=True)
+    
     with col2:
-        st.image(image, caption="Ảnh của bạn", use_column_width=True, clamp=True)
-
-    if st.button("🔮 Phân tích cảm xúc ngay!", type="primary", use_container_width=True):
-        with st.spinner("Đang phân tích cảm xúc..."):
-            time.sleep(1.5)  # Tạo hiệu ứng mượt
-            label, confidence, all_preds = predict_emotion(image)
+        if st.button("Detect Emotion", type="primary", use_container_width=True):
+            with st.spinner("Analyzing..."):
+                label, confidence, all_probs = predict_emotion(image)
+                
+            st.markdown("<div class='result-card'>", unsafe_allow_html=True)
+            st.markdown(f"<div class='emotion-big'>{emoji_map[label]}</div>", unsafe_allow_html=True)
+            st.markdown(f"### **{label}**")
+            st.markdown(f"#### Confidence: **{confidence:.1%}**")
             
-            st.markdown("---")
-            st.markdown("<div class='result-box'>", unsafe_allow_html=True)
-            
-            # Kết quả chính
-            st.markdown(f"<h1 class='emotion-emoji'>{emoji_map[label]}</h1>", unsafe_allow_html=True)
-            st.markdown(f"### **{vietnamese_names[label].upper()}**")
-            st.markdown(f"#### Độ tin cậy: **{confidence:.1%}**")
-            
-            # Thanh độ tin cậy
-            st.markdown(f"<div class='confidence-bar'><div style='width: {confidence*100:.1f}%; height:100%; background: linear-gradient(90deg, #ff6b6b, #4ecdc4); border-radius: 10px;'></div></div>", unsafe_allow_html=True)
+            # Confidence bar
+            st.markdown(f"""
+                <div class='confidence-bar'>
+                    <div class='confidence-fill' style='width: {confidence*100}%'></div>
+                </div>
+            """, unsafe_allow_html=True)
             
             st.markdown("</div>", unsafe_allow_html=True)
             
-            # Top 3 cảm xúc (tùy chọn mở rộng)
-            with st.expander("📊 Xem chi tiết tất cả cảm xúc"):
-                sorted_idx = np.argsort(all_preds)[::-1]
-                for i in sorted_idx[:5]:
-                    emo = emotion_classes[i]
-                    st.write(f"{emoji_map[emo]} **{vietnamese_names[emo]}**: {all_preds[i]:.2%}")
+            # Optional detailed view
+            with st.expander("View all emotion probabilities"):
+                sorted_idx = np.argsort(all_probs)[::-1]
+                for i in sorted_idx:
+                    emo = emotions[i]
+                    st.write(f"{emoji_map[emo]} **{emo}**: {all_probs[i]:.2%}")
 
 else:
-    with col2:
-        st.info("👈 Hãy upload một bức ảnh để bắt đầu phân tích cảm xúc!")
+    st.info("👆 Upload a photo to get started")
 
 # ============================
-# FOOTER
+# Footer
 # ============================
 st.markdown("---")
-st.caption("🚀 Được huấn luyện trên tập dữ liệu AffectNet • Mô hình VGG16 • Độ chính xác ~64% trên tập kiểm tra")
+st.caption("Model: VGG16 fine-tuned on AffectNet • 8 emotions • ~64% accuracy on validation set")
