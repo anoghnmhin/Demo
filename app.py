@@ -1,160 +1,178 @@
 import streamlit as st
 import numpy as np
-import gdown
-import os
+import pickle
 import pandas as pd
 from PIL import Image
-from tensorflow.keras.applications.vgg16 import preprocess_input
 from tensorflow import keras
 
 # ----------------------------
-# 0. Page Configuration
+# 0. Cấu hình trang (Theme Hoa)
 # ----------------------------
 st.set_page_config(
-    page_title="Emotion AI",
-    page_icon="🎭",
-    layout="centered"
+    page_title="Flower Classifier",
+    page_icon="🌸",
+    layout="wide"
 )
 
 # ----------------------------
-# 1. Link Google Drive
+# 1. Cấu hình File & Model
 # ----------------------------
-MODEL_URL = "https://drive.google.com/uc?id=13RJB6HPpb_0Mx7qoPY8l-g5MzQvvU9Nd"
-MODEL_PATH = "final_vgg16_affectnet.keras"
+# Tên file giữ nguyên như bạn đã upload
+PATH_EXTRACTOR = "vit_transfer_feature_extractor.keras"
+PATH_SCALER = "feature_scaler (1).pkl"
+PATH_CLASSIFIER_WEIGHTS = "vit_transfer_model.weights.h5"
+
+# CẤU HÌNH LẠI CHO BÀI TOÁN HOA
+# Ví dụ: Dataset hoa thường có 5 loại (Daisy, Dandelion, Rose, Sunflower, Tulip)
+# Bạn hãy sửa số này cho khớp với lúc train
+NUM_CLASSES = 5  
+IMG_SIZE = (224, 224)
+FEATURE_DIM = 768 
 
 # ----------------------------
-# 2. Download Model
-# ----------------------------
-def download_model():
-    if not os.path.exists(MODEL_PATH):
-        with st.spinner("Downloading model (~160MB), please wait..."):
-            try:
-                gdown.download(MODEL_URL, MODEL_PATH, quiet=False)
-                st.success("Model downloaded successfully!")
-            except Exception as e:
-                st.error(f"Error downloading model: {e}")
-
-download_model()
-
-# ----------------------------
-# 3. Load Model with Cache
+# 2. Load Pipeline
 # ----------------------------
 @st.cache_resource
-def load_model():
+def load_components():
+    # 1. Extractor
     try:
-        model = keras.models.load_model(MODEL_PATH)
-        return model
+        feature_extractor = keras.models.load_model(PATH_EXTRACTOR)
     except Exception as e:
-        st.error(f"Error loading model: {e}")
-        return None
+        st.error(f"Lỗi load Extractor: {e}")
+        return None, None, None
 
-model = load_model()
+    # 2. Scaler
+    try:
+        with open(PATH_SCALER, 'rb') as f:
+            scaler = pickle.load(f)
+    except Exception as e:
+        st.error(f"Lỗi load Scaler: {e}")
+        return None, None, None
+
+    # 3. Classifier (Head)
+    try:
+        # Dựng lại kiến trúc lớp cuối (Output layer)
+        # Lưu ý: Nếu bài toán hoa có 5 lớp, Dense phải là 5
+        classifier = keras.Sequential([
+            keras.layers.InputLayer(input_shape=(FEATURE_DIM,)),
+            # Nếu lúc train có Dropout hay Dense ẩn, thêm vào đây
+            # keras.layers.Dropout(0.2), 
+            keras.layers.Dense(NUM_CLASSES, activation='softmax')
+        ])
+        classifier.load_weights(PATH_CLASSIFIER_WEIGHTS)
+    except Exception as e:
+        st.error(f"Lỗi load Classifier (Sai kiến trúc hoặc file hỏng): {e}")
+        return None, None, None
+
+    return feature_extractor, scaler, classifier
+
+extractor, scaler, classifier = load_components()
 
 # ----------------------------
-# 4. Emotion Labels & Assets
+# 3. Định nghĩa Nhãn Hoa
 # ----------------------------
-emotion_classes = [
-    'anger', 'contempt', 'disgust', 'fear',
-    'happy', 'neutral', 'sad', 'surprise'
+# SỬA LẠI DANH SÁCH NÀY THEO ĐÚNG THỨ TỰ LÚC TRAIN
+flower_classes = [
+    'Daisy',      # Hoa cúc dại
+    'Dandelion',  # Bồ công anh
+    'Rose',       # Hoa hồng
+    'Sunflower',  # Hướng dương
+    'Tulip'       # Tulip
 ]
 
-# Map emotions to emojis for better UI
-emoji_map = {
-    'anger': '😡', 'contempt': '😒', 'disgust': '🤢', 'fear': '😱',
-    'happy': '😊', 'neutral': '😐', 'sad': '😢', 'surprise': '😲'
+flower_emojis = {
+    'Daisy': '🌼',
+    'Dandelion': '🏵️',
+    'Rose': '🌹',
+    'Sunflower': '🌻',
+    'Tulip': '🌷'
 }
 
 # ----------------------------
-# 5. Predict Logic (Unchanged)
+# 4. Hàm Dự đoán
 # ----------------------------
-def predict_emotion(img):
-    # Preprocessing logic kept exactly as requested
-    img_resized = img.resize((224, 224))
-    img_array = np.array(img_resized)
-    img_preprocessed = preprocess_input(img_array)
-    img_expanded = np.expand_dims(img_preprocessed, axis=0)
+def predict_flower(img_pil):
+    # Preprocess
+    img = img_pil.resize(IMG_SIZE)
+    img_array = np.array(img)
+    img_array = np.expand_dims(img_array, axis=0) # (1, 224, 224, 3)
 
-    preds = model.predict(img_expanded)[0]
-    label_index = np.argmax(preds)
-    confidence = preds[label_index]
+    # 1. Trích xuất đặc trưng
+    features = extractor.predict(img_array, verbose=0)
+    
+    # 2. Chuẩn hóa (Scaler)
+    features_scaled = scaler.transform(features)
 
-    return emotion_classes[label_index], confidence, preds
+    # 3. Phân loại
+    preds = classifier.predict(features_scaled, verbose=0)[0]
+    
+    idx = np.argmax(preds)
+    conf = preds[idx]
+    
+    return flower_classes[idx], conf, preds
 
 # ----------------------------
-# 6. UI Implementation
+# 5. Giao diện (UI)
 # ----------------------------
-
-# Sidebar
 with st.sidebar:
-    st.image("https://cdn-icons-png.flaticon.com/512/10603/10603327.png", width=100)
-    st.title("About App")
+    st.title("🌿 Vườn Thực Vật AI")
+    st.image("https://cdn-icons-png.flaticon.com/512/628/628283.png", width=100)
     st.info(
         """
-        This app uses a **VGG16** model fine-tuned on the **AffectNet** dataset.
+        Ứng dụng sử dụng **Vision Transformer (ViT)** để trích xuất đặc trưng hoa.
         
-        **Classes:**
-        - Anger 😡
-        - Contempt 😒
-        - Disgust 🤢
-        - Fear 😱
-        - Happy 😊
-        - Neutral 😐
-        - Sad 😢
-        - Surprise 😲
+        **Các loài hoa hỗ trợ:**
+        - 🌼 Daisy
+        - 🏵️ Dandelion
+        - 🌹 Rose
+        - 🌻 Sunflower
+        - 🌷 Tulip
         """
     )
-    st.write("---")
-    st.caption("Powered by TensorFlow & Streamlit")
 
-# Main Content
-st.title("🎭 Facial Emotion Recognition")
-st.markdown("### Upload a portrait to analyze emotions")
+st.title("🌸 Nhận Diện Loài Hoa (Flower Classification)")
+st.markdown("### Tải ảnh hoa lên để AI định danh")
 
-uploaded_file = st.file_uploader("Choose an image...", type=["jpg", "jpeg", "png"])
+uploaded_file = st.file_uploader("Chọn ảnh hoa...", type=["jpg", "jpeg", "png", "webp"])
 
-if uploaded_file is not None:
-    # Layout: Image on the left, Results on the right (after button press)
+if uploaded_file and extractor and scaler and classifier:
     col1, col2 = st.columns([1, 1])
     
     image = Image.open(uploaded_file).convert("RGB")
     
     with col1:
-        st.image(image, caption="Uploaded Image", use_column_width=True)
+        st.image(image, caption="Ảnh bạn đã tải lên", use_container_width=True)
 
-    # Button to trigger prediction
-    analyze_button = st.button("🔍 Analyze Emotion", use_container_width=True)
-
-    if analyze_button:
-        if model is None:
-            st.error("Model failed to load. Please check the download.")
-        else:
-            with st.spinner("Analyzing..."):
-                # Get prediction
-                label, conf, all_preds = predict_emotion(image)
+    if st.button("🔍 Định danh loài hoa", use_container_width=True):
+        with st.spinner("Đang quan sát cánh hoa..."):
+            try:
+                label, conf, all_probs = predict_flower(image)
                 
-                # Display Results in the second column
                 with col2:
-                    st.markdown("### Result")
+                    st.success("Đã có kết quả!")
                     
-                    # Primary Metric
+                    # Hiển thị kết quả to đẹp
+                    emoji = flower_emojis.get(label, '🌸')
                     st.metric(
-                        label=f"Dominant Emotion",
-                        value=f"{emoji_map.get(label, '')} {label.title()}",
-                        delta=f"{conf*100:.1f}% Confidence"
+                        label="Đây có thể là:",
+                        value=f"{emoji} {label}",
+                        delta=f"Độ tin cậy: {conf:.1%}"
                     )
                     
-                    # Progress bar for the top result
                     st.progress(float(conf))
-
-            # Show Detailed Probability Chart below
-            st.divider()
-            st.subheader("📊 Probability Distribution")
-            
-            # Create a DataFrame for the chart
-            df_probs = pd.DataFrame({
-                'Emotion': [e.title() for e in emotion_classes],
-                'Probability': all_preds
-            })
-            
-            # Display Bar Chart
-            st.bar_chart(df_probs.set_index('Emotion'), color="#FF4B4B")
+                
+                # Biểu đồ xác suất bên dưới
+                st.divider()
+                st.subheader("📊 Phân tích chi tiết")
+                
+                df_probs = pd.DataFrame({
+                    'Loài hoa': flower_classes,
+                    'Tỷ lệ': all_probs
+                })
+                
+                # Tô màu cột cao nhất
+                st.bar_chart(df_probs.set_index('Loài hoa'), color="#FF69B4") # Màu hồng
+                
+            except Exception as e:
+                st.error(f"Có lỗi khi dự đoán: {e}")
+                st.warning("Gợi ý: Kiểm tra lại xem số lượng lớp (NUM_CLASSES) trong code có khớp với file weights.h5 không.")
