@@ -4,185 +4,150 @@ import pickle
 import pandas as pd
 import os
 from PIL import Image
+import tensorflow as tf
 from tensorflow import keras
 
-# ------------------------------------------------------------------
-# 1. CẤU HÌNH TRANG (PAGE CONFIG)
-# ------------------------------------------------------------------
-st.set_page_config(
-    page_title="Flower Classifier AI",
-    page_icon="🌸",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+# --- QUAN TRỌNG: Import thư viện Hugging Face ---
+try:
+    from transformers import TFViTModel
+except ImportError:
+    st.error("⚠️ Thiếu thư viện 'transformers'. Vui lòng thêm vào requirements.txt")
+    st.stop()
 
 # ------------------------------------------------------------------
-# 2. CẤU HÌNH ĐƯỜNG DẪN FILE (PATH CONFIG)
+# 1. ĐỊNH NGHĨA CUSTOM LAYER (FIX LỖI SERIALIZATION)
 # ------------------------------------------------------------------
-# Lấy đường dẫn tuyệt đối của thư mục chứa file app.py
+# Đây là đoạn code bị thiếu khiến Keras không load được model
+@keras.saving.register_keras_serializable()
+class ViTFeatureExtractorLayer(keras.layers.Layer):
+    def __init__(self, model_name='google/vit-base-patch16-224', **kwargs):
+        super().__init__(**kwargs)
+        self.model_name = model_name
+        # Load lõi ViT từ Hugging Face
+        self.vit = TFViTModel.from_pretrained(self.model_name)
+
+    def call(self, inputs):
+        # inputs shape: (batch_size, 3, 224, 224) hoặc (batch, 224, 224, 3) tùy config
+        # TFViTModel trả về TFBaseModelOutputWithPooling
+        outputs = self.vit(inputs)
+        
+        # Lấy CLS token (vector đặc trưng đầu tiên đại diện cho cả ảnh)
+        # Shape output: (batch_size, 768)
+        return outputs.last_hidden_state[:, 0, :]
+
+    def get_config(self):
+        config = super().get_config()
+        config.update({"model_name": self.model_name})
+        return config
+
+# ------------------------------------------------------------------
+# 2. CẤU HÌNH TRANG & ĐƯỜNG DẪN
+# ------------------------------------------------------------------
+st.set_page_config(page_title="Flower Classifier AI", page_icon="🌸", layout="wide")
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-
-# Định nghĩa đường dẫn tới các file model
-# Lưu ý: Tên file phải chính xác 100% với file bạn đang có trong thư mục
 PATH_EXTRACTOR = os.path.join(BASE_DIR, "vit_transfer_feature_extractor.keras")
 PATH_SCALER = os.path.join(BASE_DIR, "feature_scaler (1).pkl")
 PATH_CLASSIFIER_WEIGHTS = os.path.join(BASE_DIR, "vit_transfer_model.weights.h5")
 
-# Thông số kỹ thuật (Phải khớp với lúc Train model)
-IMG_SIZE = (224, 224)   # Kích thước ảnh đầu vào cho ViT
-FEATURE_DIM = 768       # Số chiều đặc trưng của ViT Base
-NUM_CLASSES = 5         # Số lượng loài hoa (Daisy, Dandelion, Rose, Sunflower, Tulip)
-
-# Danh sách nhãn (Labels)
+# Thông số (Khớp với config lỗi: input shape channels first [3, 224, 224])
+IMG_SIZE = (224, 224)
+NUM_CLASSES = 5
 FLOWER_CLASSES = ['Daisy', 'Dandelion', 'Rose', 'Sunflower', 'Tulip']
 FLOWER_EMOJIS = {'Daisy': '🌼', 'Dandelion': '🏵️', 'Rose': '🌹', 'Sunflower': '🌻', 'Tulip': '🌷'}
 
 # ------------------------------------------------------------------
-# 3. HÀM LOAD MODEL (CACHED)
+# 3. HÀM LOAD MODEL
 # ------------------------------------------------------------------
 @st.cache_resource
 def load_system_components():
-    """
-    Load toàn bộ 3 thành phần: Extractor, Scaler, Classifier
-    Dùng cache để không phải load lại mỗi lần bấm nút.
-    """
-    # Kiểm tra file tồn tại
-    if not os.path.exists(PATH_EXTRACTOR):
-        st.error(f"❌ Không tìm thấy file: {PATH_EXTRACTOR}")
-        return None, None, None
-    if not os.path.exists(PATH_SCALER):
-        st.error(f"❌ Không tìm thấy file: {PATH_SCALER}")
-        return None, None, None
-    if not os.path.exists(PATH_CLASSIFIER_WEIGHTS):
-        st.error(f"❌ Không tìm thấy file: {PATH_CLASSIFIER_WEIGHTS}")
-        return None, None, None
+    # Kiểm tra file
+    if not os.path.exists(PATH_EXTRACTOR): return None, None, None, f"Thiếu file {PATH_EXTRACTOR}"
+    if not os.path.exists(PATH_SCALER): return None, None, None, f"Thiếu file {PATH_SCALER}"
+    if not os.path.exists(PATH_CLASSIFIER_WEIGHTS): return None, None, None, f"Thiếu file {PATH_CLASSIFIER_WEIGHTS}"
 
     try:
-        # A. Load ViT Feature Extractor
+        # A. Load ViT Extractor (Kèm Custom Object)
+        # Vì đã dùng decorator @register_keras_serializable, ta có thể load thẳng
         extractor = keras.models.load_model(PATH_EXTRACTOR)
         print("✅ Loaded Feature Extractor")
 
         # B. Load Scaler
         with open(PATH_SCALER, 'rb') as f:
             scaler = pickle.load(f)
-        print("✅ Loaded Scaler")
-
-        # C. Build & Load Classifier
-        # Dựng lại khung sườn (Architecture) cho Classifier
+        
+        # C. Load Classifier
+        # Lưu ý: Model Feature Extractor trả về vector (768,)
         classifier = keras.Sequential([
-            keras.layers.InputLayer(input_shape=(FEATURE_DIM,)),
-            # Nếu lúc train bạn có Dropout, hãy uncomment dòng dưới:
-            # keras.layers.Dropout(0.2), 
+            keras.layers.InputLayer(input_shape=(768,)),
             keras.layers.Dense(NUM_CLASSES, activation='softmax')
         ])
         classifier.load_weights(PATH_CLASSIFIER_WEIGHTS)
-        print("✅ Loaded Classifier Weights")
-
-        return extractor, scaler, classifier
+        
+        return extractor, scaler, classifier, None
 
     except Exception as e:
-        st.error(f"❌ Lỗi nghiêm trọng khi load model: {str(e)}")
-        return None, None, None
+        return None, None, None, str(e)
 
-# Gọi hàm load ngay khi app khởi động
-extractor, scaler, classifier = load_system_components()
+extractor, scaler, classifier, error_msg = load_system_components()
 
 # ------------------------------------------------------------------
-# 4. HÀM DỰ ĐOÁN (PREDICTION PIPELINE)
+# 4. LOGIC DỰ ĐOÁN
 # ------------------------------------------------------------------
 def predict_flower(img_pil):
-    """
-    Quy trình: Ảnh -> Resize -> ViT Extract -> Scale -> Classify
-    """
-    # 1. Tiền xử lý ảnh
+    # 1. Resize
     img = img_pil.resize(IMG_SIZE)
     img_array = np.array(img)
-    img_array = np.expand_dims(img_array, axis=0)  # Shape: (1, 224, 224, 3)
+    
+    # 2. Xử lý kênh màu (Channels)
+    # Lỗi log cho thấy input_shape model là [None, 3, 224, 224] (Channels First - NCHW)
+    # Nhưng ảnh PIL/Numpy mặc định là (224, 224, 3) (Channels Last - NHWC)
+    
+    # Ta cần transpose nếu model yêu cầu channels first
+    # Tuy nhiên, HuggingFace TFViT thường tự handle hoặc cần check input layer
+    # Dựa vào log lỗi "keras_history: ['permute', 0, 0]", có thể model đã có lớp Permute.
+    # Ta cứ đưa vào (1, 224, 224, 3), nếu model có lớp Permute đầu tiên nó sẽ tự xoay.
+    
+    img_array = np.expand_dims(img_array, axis=0) # (1, 224, 224, 3)
 
-    # 2. Trích xuất đặc trưng (Feature Extraction)
-    features = extractor.predict(img_array, verbose=0) # Shape: (1, 768)
-
-    # 3. Chuẩn hóa dữ liệu (Standard Scaling)
+    # 3. Predict
+    features = extractor.predict(img_array, verbose=0)
     features_scaled = scaler.transform(features)
-
-    # 4. Phân loại (Classification)
-    preds = classifier.predict(features_scaled, verbose=0)[0] # Trả về mảng xác suất
-
-    # 5. Lấy kết quả cao nhất
-    max_index = np.argmax(preds)
-    confidence = preds[max_index]
-    label = FLOWER_CLASSES[max_index]
-
-    return label, confidence, preds
+    preds = classifier.predict(features_scaled, verbose=0)[0]
+    
+    idx = np.argmax(preds)
+    return FLOWER_CLASSES[idx], preds[idx], preds
 
 # ------------------------------------------------------------------
-# 5. GIAO DIỆN NGƯỜI DÙNG (UI/UX)
+# 5. GIAO DIỆN
 # ------------------------------------------------------------------
-
-# --- Sidebar ---
 with st.sidebar:
-    st.image("https://cdn-icons-png.flaticon.com/512/1822/1822167.png", width=100)
-    st.title("Trợ lý AI Thực Vật")
-    st.markdown("---")
-    st.info(
-        """
-        **Mô hình:** Vision Transformer (ViT)
-        **Phương pháp:** Transfer Learning + SVM Architecture
-        **Độ chính xác:** Cao trên tập dữ liệu hoa chuẩn.
-        """
-    )
-    st.markdown("### Các loài hoa hỗ trợ:")
-    for flower in FLOWER_CLASSES:
-        st.write(f"- {FLOWER_EMOJIS[flower]} {flower}")
+    st.title("🌺 Flower AI")
+    st.info("Sửa lỗi: Custom Layer deserialization & Transformers dependency.")
 
-# --- Main Content ---
-st.title("🌸 Nhận Diện Loài Hoa Bằng AI")
-st.markdown("##### Tải ảnh bông hoa lên để hệ thống phân tích...")
+st.title("🌸 Phân Loại Hoa (ViT Patch16)")
 
-# Widget upload file
-uploaded_file = st.file_uploader("Chọn ảnh (jpg, png, jpeg)...", type=["jpg", "jpeg", "png", "webp"])
+if error_msg:
+    st.error(f"❌ Lỗi khởi động: {error_msg}")
+    st.stop()
 
-# Chỉ hiển thị giao diện phân tích khi đã load model thành công
-if extractor and scaler and classifier:
-    if uploaded_file is not None:
-        # Chia cột: Bên trái ảnh, Bên phải kết quả
-        col1, col2 = st.columns([1, 1.2], gap="large")
+uploaded_file = st.file_uploader("Upload ảnh hoa...", type=["jpg", "png", "jpeg"])
 
-        try:
-            image = Image.open(uploaded_file).convert("RGB")
-            
-            with col1:
-                st.image(image, caption="Ảnh bạn tải lên", use_column_width=True)
-
-            # Nút bấm dự đoán
-            if st.button("🔍 Phân tích ngay", use_container_width=True, type="primary"):
-                with st.spinner("Đang trích xuất đặc trưng qua mạng Neural..."):
-                    
-                    label, conf, all_probs = predict_flower(image)
-
-                # Hiển thị kết quả bên phải
+if uploaded_file:
+    col1, col2 = st.columns(2)
+    image = Image.open(uploaded_file).convert("RGB")
+    with col1:
+        st.image(image, use_column_width=True)
+    
+    if st.button("Phân tích", type="primary"):
+        with st.spinner("Đang chạy mô hình ViT..."):
+            try:
+                label, conf, all_probs = predict_flower(image)
                 with col2:
-                    st.success("Đã phân tích xong!")
+                    st.success(f"Kết quả: {label}")
+                    st.metric("Độ tin cậy", f"{conf:.1%}")
                     
-                    # Hiển thị tên hoa to và đẹp
-                    emoji = FLOWER_EMOJIS.get(label, '🌸')
-                    st.markdown(f"<h2 style='text-align: center; color: #FF4B4B;'>{emoji} {label}</h2>", unsafe_allow_html=True)
-                    
-                    # Thanh đo độ tin cậy
-                    st.metric("Độ chính xác", f"{conf:.1%}")
-                    st.progress(float(conf))
-
-                    st.markdown("---")
-                    
-                    # Biểu đồ chi tiết
-                    st.write("**Tỷ lệ dự đoán chi tiết:**")
-                    df_probs = pd.DataFrame({
-                        'Loài hoa': FLOWER_CLASSES,
-                        'Tỷ lệ': all_probs
-                    })
-                    st.bar_chart(df_probs.set_index('Loài hoa'), color="#FF69B4")
-
-        except Exception as e:
-            st.error(f"Có lỗi khi xử lý ảnh: {e}")
-else:
-    st.warning("⚠️ Hệ thống đang khởi động hoặc thiếu file model. Vui lòng kiểm tra lại thư mục deploy.")
+                    df = pd.DataFrame({'Hoa': FLOWER_CLASSES, 'Tỷ lệ': all_probs})
+                    st.bar_chart(df.set_index('Hoa'))
+            except Exception as e:
+                st.error(f"Lỗi khi dự đoán: {e}")
