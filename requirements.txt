@@ -1,6 +1,6 @@
-gdown
-tensorflow
 streamlit
+tensorflow-cpu
 numpy
+pandas
 Pillow
-
+scikit-learn
